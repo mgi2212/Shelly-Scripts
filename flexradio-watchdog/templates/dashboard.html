@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — FlexRadio Watchdog{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+  <!-- Radio Status -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><strong>Radio Status</strong></div>
+      <div class="card-body">
+        <h3 id="radio-state">
+          <span class="status-dot unknown" id="radio-dot"></span>
+          <span id="radio-label">Checking...</span>
+        </h3>
+        <p class="mb-1"><small>Last check: <span id="last-check">—</span></small></p>
+        <p class="mb-1"><small>Detail: <span id="radio-detail">—</span></small></p>
+        <p class="mb-0"><small>Checks: <span id="check-count">0</span></small></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shelly Device -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><strong>Shelly Device</strong></div>
+      <div class="card-body">
+        <div id="shelly-status">
+          {% if config.shelly_ip %}
+          <p class="mb-1">IP: <code>{{ config.shelly_ip }}</code></p>
+          <p class="mb-1">Voltage: <span id="shelly-voltage">—</span></p>
+          <p class="mb-1">Power: <span id="shelly-power">—</span></p>
+          <p class="mb-0">Watchdog: <span id="shelly-watchdog">—</span></p>
+          {% else %}
+          <p class="text-muted">No Shelly IP configured. <a href="/wizard">Run setup</a>.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Controls -->
+{% if config.shelly_ip %}
+<div class="row mb-4">
+  <div class="col">
+    <div class="card">
+      <div class="card-header"><strong>Controls</strong></div>
+      <div class="card-body d-flex gap-2 flex-wrap">
+        <button class="btn btn-success btn-sm" onclick="setWatchdog(true)">Enable Watchdog</button>
+        <button class="btn btn-warning btn-sm" onclick="setWatchdog(false)">Disable Watchdog</button>
+        <button class="btn btn-outline-danger btn-sm" onclick="confirmPowerCycle()">Power Cycle Radio</button>
+        <span id="control-msg" class="ms-3 align-self-center small"></span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Log -->
+<div class="row">
+  <div class="col">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>Recent Log</strong>
+        <small class="text-muted">Auto-refresh 5s</small>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-borderless log-table mb-0">
+          <thead><tr><th>Time</th><th>Status</th><th>Detail</th></tr></thead>
+          <tbody id="log-body">
+            <tr><td colspan="3" class="text-muted">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function refreshDashboard() {
+  fetch('/api/dashboard')
+    .then(r => r.json())
+    .then(d => {
+      const dot = document.getElementById('radio-dot');
+      const label = document.getElementById('radio-label');
+      dot.className = 'status-dot ' + (d.alive ? 'alive' : 'dead');
+      label.textContent = d.alive ? 'ALIVE' : 'DOWN';
+
+      const ts = d.last_check ? new Date(d.last_check * 1000).toLocaleTimeString() : '—';
+      document.getElementById('last-check').textContent = ts;
+      document.getElementById('radio-detail').textContent = d.detail || '—';
+      document.getElementById('check-count').textContent = d.check_count || 0;
+
+      const tbody = document.getElementById('log-body');
+      if (d.log_entries && d.log_entries.length > 0) {
+        tbody.innerHTML = d.log_entries.slice().reverse().map(e =>
+          `<tr><td>${e.time}</td><td>${e.alive ? '<span class="text-success">ALIVE</span>' : '<span class="text-danger">DOWN</span>'}</td><td>${e.detail}</td></tr>`
+        ).join('');
+      }
+    })
+    .catch(() => {});
+}
+
+function refreshShelly() {
+  fetch('/api/shelly-status')
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) return;
+      // Extract voltage and power from switch:0 status
+      const sw0 = d['switch:0'] || {};
+      const vElem = document.getElementById('shelly-voltage');
+      const pElem = document.getElementById('shelly-power');
+      if (vElem) vElem.textContent = sw0.voltage != null ? sw0.voltage.toFixed(1) + 'V' : '—';
+      if (pElem) pElem.textContent = sw0.apower != null ? sw0.apower.toFixed(1) + 'W' : '—';
+    })
+    .catch(() => {});
+}
+
+function setWatchdog(enabled) {
+  fetch('/api/watchdog', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: enabled})
+  })
+  .then(r => r.json())
+  .then(d => {
+    const msg = document.getElementById('control-msg');
+    msg.textContent = 'Watchdog ' + (enabled ? 'enabled' : 'disabled');
+    setTimeout(() => msg.textContent = '', 3000);
+  })
+  .catch(e => alert('Error: ' + e));
+}
+
+function confirmPowerCycle() {
+  if (!confirm('Are you sure? This will cut power to the radio for ~2 minutes.')) return;
+  fetch('/api/power-cycle', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  })
+  .then(r => r.json())
+  .then(() => {
+    const msg = document.getElementById('control-msg');
+    msg.textContent = 'Power cycle triggered';
+    setTimeout(() => msg.textContent = '', 5000);
+  })
+  .catch(e => alert('Error: ' + e));
+}
+
+refreshDashboard();
+refreshShelly();
+setInterval(refreshDashboard, 5000);
+setInterval(refreshShelly, 15000);
+</script>
+{% endblock %}

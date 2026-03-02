@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}Setup Wizard — FlexRadio Watchdog{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <strong>Setup Wizard</strong>
+    <span class="float-end text-muted" id="step-indicator">Step 1 of 5</span>
+  </div>
+  <div class="card-body">
+
+    <!-- Step 1: FlexRadio -->
+    <div class="wizard-step active" id="step-1">
+      <h5>Step 1: FlexRadio Connection</h5>
+      <p>Enter your FlexRadio's IP address, or scan the network to discover it.</p>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">FlexRadio IP Address</label>
+          <input type="text" class="form-control" id="radio-ip" value="{{ config.radio_ip }}" placeholder="192.168.0.25">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">API Port</label>
+          <input type="number" class="form-control" id="api-port" value="{{ config.api_port }}">
+        </div>
+        <div class="col-md-3 d-flex align-items-end gap-2">
+          <button class="btn btn-primary btn-sm" onclick="testRadio()">Test</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="scanRadios()">Scan Network</button>
+        </div>
+      </div>
+      <div id="radio-scan-result" class="mb-3"></div>
+    </div>
+
+    <!-- Step 2: Shelly -->
+    <div class="wizard-step" id="step-2">
+      <h5>Step 2: Shelly Device</h5>
+      <p>Enter the IP of the Shelly device controlling your radio's power.</p>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">Shelly IP Address</label>
+          <input type="text" class="form-control" id="shelly-ip" value="{{ config.shelly_ip }}" placeholder="192.168.0.100">
+        </div>
+        <div class="col-md-3 d-flex align-items-end gap-2">
+          <button class="btn btn-primary btn-sm" onclick="testShelly()">Test</button>
+          {% if has_zeroconf %}
+          <button class="btn btn-outline-primary btn-sm" onclick="scanShellys()">Scan mDNS</button>
+          {% endif %}
+        </div>
+      </div>
+      <div id="shelly-scan-result" class="mb-3"></div>
+    </div>
+
+    <!-- Step 3: Parameters -->
+    <div class="wizard-step" id="step-3">
+      <h5>Step 3: Watchdog Parameters</h5>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label">Check Interval (seconds)</label>
+          <input type="number" class="form-control" id="interval" value="{{ config.interval }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">HTTP Server Port</label>
+          <input type="number" class="form-control" id="http-port" value="{{ config.http_port }}">
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: UPnP -->
+    <div class="wizard-step" id="step-4">
+      <h5>Step 4: Remote Access (UPnP Port Forwarding)</h5>
+      {% if has_upnp %}
+      <p>Set up port forwarding so you can access the dashboard and Shelly device remotely.</p>
+      <div class="alert alert-warning">
+        <strong>Security:</strong> If you enable remote access, set a username and password below first.
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-control" id="auth-user" value="{{ config.basic_auth_user }}" placeholder="admin">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control" id="auth-pass" placeholder="Enter password">
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label">External Port (Watchdog UI)</label>
+          <input type="number" class="form-control" id="upnp-flask-port" value="{{ config.upnp_flask_external_port }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">External Port (Shelly UI)</label>
+          <input type="number" class="form-control" id="upnp-shelly-port" value="{{ config.upnp_shelly_external_port }}">
+        </div>
+        <div class="col-md-4 d-flex align-items-end gap-2">
+          <button class="btn btn-primary btn-sm" onclick="discoverUpnp()">Discover Router</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="setupUpnp()" id="btn-upnp-forward" disabled>Set Up Forwarding</button>
+        </div>
+      </div>
+      <div id="upnp-result" class="mb-3"></div>
+      {% else %}
+      <div class="alert alert-info">
+        UPnP support requires the <code>miniupnpc</code> library.<br>
+        Install it with: <code>pip install miniupnpc</code>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Step 5: Summary -->
+    <div class="wizard-step" id="step-5">
+      <h5>Step 5: Review &amp; Save</h5>
+      <table class="table table-sm">
+        <tbody id="summary-table"></tbody>
+      </table>
+      <div id="save-result" class="mb-3"></div>
+    </div>
+
+    <!-- Navigation -->
+    <hr>
+    <div class="d-flex justify-content-between">
+      <button class="btn btn-secondary btn-sm" id="btn-prev" onclick="prevStep()" disabled>Previous</button>
+      <button class="btn btn-primary btn-sm" id="btn-next" onclick="nextStep()">Next</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentStep = 1;
+const totalSteps = 5;
+
+function showStep(n) {
+  currentStep = n;
+  document.querySelectorAll('.wizard-step').forEach((el, i) => {
+    el.classList.toggle('active', i + 1 === n);
+  });
+  document.getElementById('step-indicator').textContent = `Step ${n} of ${totalSteps}`;
+  document.getElementById('btn-prev').disabled = (n === 1);
+  const btnNext = document.getElementById('btn-next');
+  if (n === totalSteps) {
+    btnNext.textContent = 'Save & Start';
+    btnNext.className = 'btn btn-success btn-sm';
+    buildSummary();
+  } else {
+    btnNext.textContent = 'Next';
+    btnNext.className = 'btn btn-primary btn-sm';
+  }
+}
+
+function nextStep() {
+  if (currentStep === totalSteps) {
+    saveConfig();
+    return;
+  }
+  showStep(currentStep + 1);
+}
+
+function prevStep() {
+  if (currentStep > 1) showStep(currentStep - 1);
+}
+
+function getConfig() {
+  return {
+    radio_ip: document.getElementById('radio-ip').value,
+    api_port: parseInt(document.getElementById('api-port').value) || 4992,
+    shelly_ip: document.getElementById('shelly-ip').value,
+    interval: parseInt(document.getElementById('interval').value) || 30,
+    http_port: parseInt(document.getElementById('http-port').value) || 8080,
+    basic_auth_user: document.getElementById('auth-user') ? document.getElementById('auth-user').value : '',
+    basic_auth_pass: document.getElementById('auth-pass') ? document.getElementById('auth-pass').value : '',
+    upnp_flask_external_port: parseInt((document.getElementById('upnp-flask-port') || {}).value) || 8080,
+    upnp_shelly_external_port: parseInt((document.getElementById('upnp-shelly-port') || {}).value) || 8081,
+  };
+}
+
+function buildSummary() {
+  const cfg = getConfig();
+  const rows = [
+    ['FlexRadio IP', cfg.radio_ip || '<em class="text-muted">not set</em>'],
+    ['API Port', cfg.api_port],
+    ['Shelly IP', cfg.shelly_ip || '<em class="text-muted">not set</em>'],
+    ['Check Interval', cfg.interval + 's'],
+    ['HTTP Port', cfg.http_port],
+    ['Auth User', cfg.basic_auth_user || '<em class="text-muted">none (no auth)</em>'],
+  ];
+  document.getElementById('summary-table').innerHTML = rows.map(
+    r => `<tr><td><strong>${r[0]}</strong></td><td>${r[1]}</td></tr>`
+  ).join('');
+}
+
+function showResult(elemId, html) {
+  document.getElementById(elemId).innerHTML = html;
+}
+
+// ---- Step 1: Radio ----
+
+function testRadio() {
+  const ip = document.getElementById('radio-ip').value;
+  const port = document.getElementById('api-port').value || 4992;
+  showResult('radio-scan-result', '<span class="text-muted">Testing...</span>');
+  fetch('/api/wizard/test-connection', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip, port: parseInt(port)})
+  })
+  .then(r => r.json())
+  .then(d => {
+    const cls = d.ok ? 'text-success' : 'text-danger';
+    showResult('radio-scan-result', `<span class="${cls}">${d.detail}</span>`);
+  })
+  .catch(e => showResult('radio-scan-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+function scanRadios() {
+  showResult('radio-scan-result', '<span class="text-muted">Scanning (5s)...</span>');
+  fetch('/api/wizard/scan-radios', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({timeout: 5})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) { showResult('radio-scan-result', `<span class="text-danger">${d.error}</span>`); return; }
+    if (!d.radios || d.radios.length === 0) {
+      showResult('radio-scan-result', '<span class="text-warning">No radios found. Is the FlexRadio powered on?</span>');
+      return;
+    }
+    let html = '<div class="list-group">';
+    d.radios.forEach(r => {
+      const label = `${r.model || 'FlexRadio'} (${r.ip}) ${r.serial ? '— SN: ' + r.serial : ''}`;
+      html += `<button type="button" class="list-group-item list-group-item-action" onclick="document.getElementById('radio-ip').value='${r.ip}'">${label}</button>`;
+    });
+    html += '</div>';
+    showResult('radio-scan-result', html);
+  })
+  .catch(e => showResult('radio-scan-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+// ---- Step 2: Shelly ----
+
+function testShelly() {
+  const ip = document.getElementById('shelly-ip').value;
+  showResult('shelly-scan-result', '<span class="text-muted">Testing...</span>');
+  fetch('/api/wizard/test-connection', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip, port: 80})
+  })
+  .then(r => r.json())
+  .then(d => {
+    const cls = d.ok ? 'text-success' : 'text-danger';
+    showResult('shelly-scan-result', `<span class="${cls}">${d.detail}</span>`);
+  })
+  .catch(e => showResult('shelly-scan-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+function scanShellys() {
+  showResult('shelly-scan-result', '<span class="text-muted">Scanning mDNS (5s)...</span>');
+  fetch('/api/wizard/scan-shellys', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({timeout: 5})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) { showResult('shelly-scan-result', `<span class="text-danger">${d.error}</span>`); return; }
+    if (!d.devices || d.devices.length === 0) {
+      showResult('shelly-scan-result', '<span class="text-warning">No Shelly devices found.</span>');
+      return;
+    }
+    let html = '<div class="list-group">';
+    d.devices.forEach(dev => {
+      const label = `${dev.name} (${dev.ip})`;
+      html += `<button type="button" class="list-group-item list-group-item-action" onclick="document.getElementById('shelly-ip').value='${dev.ip}'">${label}</button>`;
+    });
+    html += '</div>';
+    showResult('shelly-scan-result', html);
+  })
+  .catch(e => showResult('shelly-scan-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+// ---- Step 4: UPnP ----
+
+function discoverUpnp() {
+  showResult('upnp-result', '<span class="text-muted">Discovering router...</span>');
+  fetch('/api/wizard/upnp-discover', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) {
+      showResult('upnp-result', `<span class="text-danger">${d.error}</span>`);
+      return;
+    }
+    showResult('upnp-result',
+      `<span class="text-success">Router found! External IP: <strong>${d.external_ip}</strong>, LAN IP: ${d.lan_ip}</span>`
+    );
+    document.getElementById('btn-upnp-forward').disabled = false;
+  })
+  .catch(e => showResult('upnp-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+function setupUpnp() {
+  const cfg = getConfig();
+  showResult('upnp-result', '<span class="text-muted">Setting up port forwarding...</span>');
+  fetch('/api/wizard/upnp-forward', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) {
+      showResult('upnp-result', `<span class="text-danger">${d.error}</span>`);
+      return;
+    }
+    let html = `<p class="text-success">External IP: <strong>${d.external_ip}</strong></p><ul>`;
+    (d.mappings || []).forEach(m => {
+      if (m.ok || m.ok === undefined) {
+        html += `<li class="text-success">${m.description}: WAN:${m.external_port} &rarr; ${m.internal}${m.internal_port ? '' : ''}</li>`;
+      } else {
+        html += `<li class="text-danger">${m.description}: ${m.error}</li>`;
+      }
+    });
+    html += '</ul>';
+    showResult('upnp-result', html);
+  })
+  .catch(e => showResult('upnp-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+
+// ---- Step 5: Save ----
+
+function saveConfig() {
+  const cfg = getConfig();
+  showResult('save-result', '<span class="text-muted">Saving...</span>');
+  fetch('/api/wizard/save-config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      showResult('save-result',
+        '<div class="alert alert-success">Configuration saved! Watchdog restarted. <a href="/dashboard">Go to Dashboard</a></div>'
+      );
+    } else {
+      showResult('save-result', `<span class="text-danger">${d.error || 'Unknown error'}</span>`);
+    }
+  })
+  .catch(e => showResult('save-result', `<span class="text-danger">Error: ${e}</span>`));
+}
+</script>
+{% endblock %}

@@ -28,6 +28,22 @@ Turning Output 1 ON triggers the sequence:
 2. After 60s, restore mains power (close relay)
 3. After 120s, assert REM ON (boot the radio back up)
 
+Features: SmartSDR process watchdog (via companion Python proxy), battery voltage monitoring with load shedding for solar/off-grid sites, configurable enable/disable via HTTP API or physical input, exponential backoff on retries.
+
+### [flexradio-watchdog/](flexradio-watchdog/) (Python)
+
+Web-based companion for the FlexRadio power cycle script. Pings the SmartSDR API (TCP 4992) to verify the radio process is alive and exposes the result via HTTP for the Shelly watchdog.
+
+- **Dashboard** — live radio status, battery voltage, Shelly device info, watchdog controls
+- **Setup Wizard** — auto-discover FlexRadio and Shelly devices, configure parameters, set up UPnP port forwarding for remote access
+- **Basic auth** — optional authentication for remote access (Shelly endpoints exempt)
+
+```bash
+pip install flask requests miniupnpc zeroconf
+cd flexradio-watchdog
+python __main__.py --radio-ip 192.168.0.25
+```
+
 ### [i4-relay-mapper.js](i4-relay-mapper.js)
 
 Maps 1–4 physical inputs on a Shelly Plus i4 to relay outputs on one or more remote Shelly devices via local HTTP RPC. Useful for pairing a centralized button panel with distributed relay devices.
