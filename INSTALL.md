@@ -111,9 +111,9 @@ Example thresholds for common battery banks:
 
 ---
 
-## Step 4: Install the Watchdog Proxy (PC)
+## Step 4: Install the Watchdog Proxy (PC or Raspberry Pi)
 
-The Python watchdog proxy runs on a PC or Mac on the same LAN. It pings the FlexRadio's SmartSDR API to verify the process is alive.
+The Python watchdog proxy runs on a PC, Mac, or Raspberry Pi on the same LAN. It pings the FlexRadio's SmartSDR API to verify the process is alive.
 
 ### Quick Start (Headless)
 
@@ -172,6 +172,80 @@ nssm start FlexRadioWatchdog
 ```
 
 Or add a shortcut to `shell:startup` that runs the command.
+
+### Running on a Raspberry Pi
+
+The watchdog runs on any Raspberry Pi (Zero 2 W and up). The Pi also provides GPIO pins for additional station control (amplifier power, antenna switching, sensors, etc.).
+
+**Install on Raspberry Pi OS:**
+
+```bash
+# Flask + core dependencies
+sudo apt update
+sudo apt install -y python3-flask python3-requests
+
+# Optional: UPnP and Shelly discovery
+pip3 install miniupnpc zeroconf
+
+# gpiozero is pre-installed on Raspberry Pi OS
+# If missing: sudo apt install -y python3-gpiozero
+
+# Clone the repo
+git clone https://github.com/mgi2212/Shelly-Scripts.git
+cd Shelly-Scripts/flexradio-watchdog
+
+# Run
+python3 __main__.py --radio-ip 192.168.0.25
+```
+
+**GPIO pin configuration** — add a `gpio_pins` array to `flexradio-watchdog.json`:
+
+```json
+{
+  "radio_ip": "192.168.0.25",
+  "shelly_ip": "192.168.0.100",
+  "gpio_pins": [
+    {"pin": 17, "mode": "output", "label": "Amp Power", "initial": false},
+    {"pin": 27, "mode": "output", "label": "Aux Relay", "initial": false},
+    {"pin": 22, "mode": "input",  "label": "Door Sensor", "pull_up": true},
+    {"pin": 23, "mode": "input",  "label": "Temp Alert", "pull_up": true}
+  ]
+}
+```
+
+Configured GPIO pins appear on the dashboard with toggle buttons (outputs) and live state indicators (inputs). The GPIO API is also available for automation:
+
+```
+GET  /api/gpio          — all pin states (JSON)
+POST /api/gpio/17       — set output: {"state": true}
+```
+
+**Auto-start on boot (systemd):**
+
+```bash
+sudo tee /etc/systemd/system/flexradio-watchdog.service << 'EOF'
+[Unit]
+Description=FlexRadio Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Shelly-Scripts/flexradio-watchdog
+ExecStart=/usr/bin/python3 __main__.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable flexradio-watchdog
+sudo systemctl start flexradio-watchdog
+```
+
+Check status: `sudo systemctl status flexradio-watchdog`
 
 ---
 

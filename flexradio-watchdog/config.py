@@ -14,6 +14,12 @@ DEFAULT_CONFIG = {
     "upnp_shelly_external_port": 8081,
     "basic_auth_user": "",
     "basic_auth_pass": "",
+    "gpio_pins": [],
+    # gpio_pins example:
+    # [
+    #   {"pin": 17, "mode": "output", "label": "Amp Power", "initial": false},
+    #   {"pin": 27, "mode": "input",  "label": "Door Sensor", "pull_up": true}
+    # ]
 }
 
 

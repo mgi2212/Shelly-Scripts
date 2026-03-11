@@ -16,6 +16,7 @@ from discovery import (
     discover_flexradios, discover_shellys, test_tcp_connection,
     upnp_discover, upnp_setup_forwarding, HAS_UPNP, HAS_ZEROCONF,
 )
+from gpio import GPIOManager, HAS_GPIO
 
 
 # ---- Auth ----
@@ -50,6 +51,18 @@ def create_app(config):
 
     status = RadioStatus()
     app.config["radio_status"] = status
+
+    # GPIO manager (Raspberry Pi only — no-op on other platforms)
+    gpio = GPIOManager() if HAS_GPIO else None
+    app.config["gpio"] = gpio
+
+    # Set up GPIO pins from config (list of {pin, mode, label, initial})
+    if gpio and config.get("gpio_pins"):
+        for p in config["gpio_pins"]:
+            if p.get("mode") == "output":
+                gpio.setup_output(p["pin"], label=p.get("label", ""), initial=p.get("initial", False))
+            elif p.get("mode") == "input":
+                gpio.setup_input(p["pin"], label=p.get("label", ""), pull_up=p.get("pull_up", True))
 
     # Start background check thread
     t = threading.Thread(
@@ -88,7 +101,8 @@ def create_app(config):
         return render_template("dashboard.html",
                                config=cfg,
                                has_upnp=HAS_UPNP,
-                               has_zeroconf=HAS_ZEROCONF)
+                               has_zeroconf=HAS_ZEROCONF,
+                               has_gpio=HAS_GPIO)
 
     @app.route("/wizard")
     @requires_auth
@@ -226,6 +240,27 @@ def create_app(config):
         app.config["check_thread"] = t
 
         return jsonify({"ok": True, "message": "Configuration saved and watchdog restarted"})
+
+    # ---- GPIO API ----
+
+    @app.route("/api/gpio")
+    @requires_auth
+    def api_gpio_state():
+        if not gpio:
+            return jsonify({"error": "GPIO not available (not a Raspberry Pi or gpiozero not installed)"}), 404
+        return jsonify(gpio.get_all_state())
+
+    @app.route("/api/gpio/<int:pin>", methods=["POST"])
+    @requires_auth
+    def api_gpio_set(pin):
+        if not gpio:
+            return jsonify({"error": "GPIO not available"}), 404
+        data = request.json or {}
+        state = data.get("state", False)
+        ok = gpio.set_output(pin, bool(state))
+        if not ok:
+            return jsonify({"error": f"Pin {pin} is not configured as an output"}), 400
+        return jsonify({"pin": pin, "state": bool(state)})
 
     @app.route("/api/config")
     @requires_auth

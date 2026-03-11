@@ -56,6 +56,20 @@
 </div>
 {% endif %}
 
+<!-- GPIO (Raspberry Pi) -->
+{% if has_gpio %}
+<div class="row mb-4">
+  <div class="col">
+    <div class="card">
+      <div class="card-header"><strong>GPIO Pins</strong></div>
+      <div class="card-body" id="gpio-panel">
+        <span class="text-muted">Loading...</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Log -->
 <div class="row">
   <div class="col">
@@ -149,9 +163,51 @@ function confirmPowerCycle() {
   .catch(e => alert('Error: ' + e));
 }
 
+function refreshGpio() {
+  const panel = document.getElementById('gpio-panel');
+  if (!panel) return;
+  fetch('/api/gpio')
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { panel.innerHTML = `<span class="text-muted">${d.error}</span>`; return; }
+      let html = '';
+      if (d.outputs && d.outputs.length > 0) {
+        html += '<div class="mb-2"><strong>Outputs</strong></div><div class="d-flex gap-2 flex-wrap mb-3">';
+        d.outputs.forEach(p => {
+          const cls = p.state ? 'btn-success' : 'btn-outline-secondary';
+          html += `<button class="btn btn-sm ${cls}" onclick="toggleGpio(${p.pin}, ${!p.state})">${p.label} (GPIO${p.pin}): ${p.state ? 'ON' : 'OFF'}</button>`;
+        });
+        html += '</div>';
+      }
+      if (d.inputs && d.inputs.length > 0) {
+        html += '<div class="mb-2"><strong>Inputs</strong></div><div class="d-flex gap-2 flex-wrap">';
+        d.inputs.forEach(p => {
+          const cls = p.state ? 'text-success' : 'text-muted';
+          html += `<span class="badge bg-dark border me-1"><span class="${cls}">${p.label} (GPIO${p.pin}): ${p.state ? 'HIGH' : 'LOW'}</span></span>`;
+        });
+        html += '</div>';
+      }
+      if (!html) html = '<span class="text-muted">No GPIO pins configured</span>';
+      panel.innerHTML = html;
+    })
+    .catch(() => {});
+}
+
+function toggleGpio(pin, state) {
+  fetch(`/api/gpio/${pin}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({state: state})
+  })
+  .then(() => refreshGpio())
+  .catch(e => alert('GPIO error: ' + e));
+}
+
 refreshDashboard();
 refreshShelly();
+refreshGpio();
 setInterval(refreshDashboard, 5000);
 setInterval(refreshShelly, 15000);
+setInterval(refreshGpio, 5000);
 </script>
 {% endblock %}
